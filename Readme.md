@@ -8,6 +8,14 @@ The tool's activities are primarily controlled via environment variables, with a
 
 These are the environment variables that can modify the tool's operations:
 
+- **DRY__RUN=(True|False)**
+
+  Enable dry run mode, which both enables DEBUG mode, and disables executing any actual work on the targets. Intermediate, temporary files will be created, and target files will be inspected, but no changes will be applied.
+
+- **DEBUG=(True|False)**
+
+  Enable debug mode, which causes additional output to view what the script is thinking/doing (this is False by default)
+
 - **PARALLELISM=number**
 
   The maximum number of parallel processes to use when running a task (chmod or chown). This is important to accelerate processing. The default is 4. Minimum is 1, maximum is 10
@@ -16,17 +24,13 @@ These are the environment variables that can modify the tool's operations:
 
   The size of each parallel batch to be processed. A batch's contents are processed in order, but when running in parallel multiple batches are run at the same time. The default is 1,000.
 
-- **DEBUG=(True|False)**
-
-  Enable debug mode, which causes additional output to view what the script is thinking/doing (this is False by default)
-
 - **NOROOT=(True|False)**
 
   Enable non-root mode. This may have an impact on the script's ability to perform its duties as non-root users have limited ability to change file ownership and permissions based on existing ownership and permissions. This is disabled by default (i.e. must run as root)
 
 - **JOBS=(YAML|*file-path*)**
 
-  The **JOBS** variable can contain an entire YAML document, or the path to one which will be read and used to guid processing. This listing shows an example document:
+  The **JOBS** variable can contain an entire YAML document, a filesystem path, or a URL to one which will be read and used to guid processing. This listing shows an example document:
 
 ```yaml
 jobs:
@@ -67,13 +71,22 @@ May be a string describing a user:group pair, or the path of a file/object whose
 - **jim:** (owner = jim, group = *jim's default group*)
 - **/some/file/path** (copy ownership from the given path, must be an absolute path, and it must exist - both owner and group will be copied over)
 
+Alternatively, it can be specified using a map which contains either a combination of user/group members, or the reference member:
+
+```yaml
+ownership:
+  owner: "the owner"
+  group: "the group (or use * to select the owner's default group)"
+  reference: "/the/file/to/be/referenced/for/ownership"
+```
+
 ### **permissions**
 
 May be a string describing a set of permissions to apply, as accepted by **chmod**, or the path of a file/object whose permissions are to be mimicked (must be an absolute path, and it must exist). The exact same syntax that **chmod** supports is accepted, and validated.
 
 ### **flags**
 
-May be a combination of (\* marks flags enabled by default):
+This element contains flags that will affect how the commands will do their job. It's expected to be an array of strings, but may also be a comma-separated string containing any of the following values (\* marks flags enabled by default):
 
 - **quiet \***
 
@@ -125,7 +138,7 @@ May be a combination of (\* marks flags enabled by default):
 
 - **notraverse \***
 
-  don't 'traverse any symbolic links to directories encountered (***default***)
+  don't traverse any symbolic links to directories encountered (***default***)
 
 Please note that the **quiet**, **changes**, and **verbose** are mutually exclusive and only one may be used at any given time. The same goes for flags that have a "*no*" variant - i.e. **traverse** and **notraverse** may not be used at the same time.
 

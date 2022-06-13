@@ -1,5 +1,8 @@
 jobs:
-  - ownership: ":998"
+  - ownership:
+      #owner: "diego"
+      #group: "998"
+      #reference: "/kaka"
     permissions: "u=rwX,g=rX,o="
     flags: [ "quiet", "recurse",  "noforced", "deref", "create", "traverse" ]
     targets: 

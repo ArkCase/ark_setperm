@@ -22,6 +22,11 @@ import sys
 import tempfile
 import time
 import traceback
+import urllib, urllib.parse, urllib.request
+
+TYPE_LIST = type([])
+TYPE_STRING = type("")
+TYPE_DICT = type({})
 
 TRUE_VALUES = { "true" : True, "yes" : True, "y" : True, "1" : True, "on" : True, "enabled" : True, "enable" : True }
 
@@ -41,6 +46,20 @@ def debug(msg, *args):
 	if not DEBUG:
 		return None
 	print(msg % args)
+
+#
+# Set the dry run mode
+#
+DRY_RUN = False
+try:
+	dr = os.environ["DRY_RUN"].lower()
+	if TRUE_VALUES.get(dr):
+		DRY_RUN = True
+		DEBUG = True
+		debug("WARNING: Dry run mode active")
+except KeyError:
+	# Do nothing - stick to the default value
+	pass
 
 #
 # Check to see if we're allowed to run as non-root
@@ -208,7 +227,7 @@ if failed:
 # Now load the job data
 #
 try:
-	document = os.environ["JOBS"].strip()
+	document = os.environ["JOBS"]
 except KeyError:
 	fail("The JOBS variable has not been set. Cannot continue.")
 
@@ -221,15 +240,28 @@ if "" == document:
 #
 # First things first: does it point to a file somewhere? If so, use that ...
 #
-if os.path.isfile(document):
+url = urllib.parse.urlparse(document)
+if url.scheme:
+	# It's a URL ... so open it as such
+	try:
+		document = urllib.request.urlopen(document, timeout=300)
+	except Exception as e:
+		fail("Failed to open the jobs from URL [%s] -> %s: %s" % (document, url, str(e)))
+elif os.path.isfile(document):
+	# Not a URL, but it's a path ... so open it
 	document = open(document)
+
+#
+# At this point "document" carries either the YAML to be parsed, or a stream from
+# which to parse it
+#
 
 #
 # Now parse the list of jobs that we have to run
 #
 try:
 	yamlData = load(document, Loader=Loader)
-	if not isinstance(yamlData, type({})):
+	if not isinstance(yamlData, TYPE_DICT):
 		fail("Bad YAML structure - must produce a dict:\n%s" % (yamlData))
 except Exception as e:
 	msg = ""
@@ -241,7 +273,7 @@ except Exception as e:
 	fail(msg)
 finally:
 	# Clean up if necessary
-	if not isinstance(document, type("")):
+	if not isinstance(document, TYPE_STRING):
 		document.close()
 
 #
@@ -255,7 +287,7 @@ except KeyError:
 #
 # Make sure that things at least appear to be in order
 #
-if not isinstance(jobs, type([])):
+if not isinstance(jobs, TYPE_LIST):
 	fail("YAML Data is improperly structured - must start with a 'jobs:' array")
 
 def needs_changes(tgt, ownership, permissions, statDir, statFile):
@@ -286,20 +318,42 @@ def needs_changes(tgt, ownership, permissions, statDir, statFile):
 	return result
 
 def parse_ownership(ownership):
-	if not ownership:
-		return { "owner" : None, "group" : None }
-
-	# Ensure it's a string...
-	if not isinstance(ownership, type("")):
-		raise InvalidOwnershipSyntax("Not a string: %s" % str(ownership))
-
 	# We can set this early, and change later
 	command = "chown"
+
+	if not ownership:
+		debug("No ownership changes have been requested")
+		return None
+
+	if isinstance(ownership, TYPE_DICT):
+		owner = ownership.get("owner")
+		group = ownership.get("group")
+		reference = ownership.get("reference")
+		if reference and (owner or group):
+			raise InvalidOwnershipSyntax("may only provide a refrence, or the owner and/or group: %s" % (ownership))
+		elif reference:
+			if not os.path.isabs(reference):
+				raise InvalidOwnershipSyntax("The given reference [%s] is not an absolute file" % (reference))
+			if not os.path.exists(reference):
+				raise InvalidOwnershipSyntax("The given reference [%s] does not exist" % (reference))
+			debug("Ownership changes will happen using the file [%s] as reference", reference)
+			return { "ownership" : reference, "command" : command }
+		elif owner and group:
+			ownership = "%s:%s" % (owner, group)
+		elif owner:
+			ownership = owner
+		elif group:
+			ownership = ":%s" % (group)
+
+	# Ensure it's a string...
+	if not isinstance(ownership, TYPE_STRING):
+		raise InvalidOwnershipSyntax("Not a string: %s" % str(ownership))
 
 	# First ... is it a file path? If so, check that it exists
 	if ownership.startswith("/"):
 		if not os.exists(ownership):
 			raise MissingOwnershipReference(ownership)
+		debug("Ownership changes will happen using the file [%s] as reference", ownership)
 		return { "ownership" : ownership, "command" : command }
 
 	# Valid formats:
@@ -332,10 +386,15 @@ def parse_ownership(ownership):
 			group = str(group)
 		except ValueError:
 			# Not a number, so must be a string ... check to see if the group exists
-			try:
-				grp.getgrnam(group)
-			except KeyError:
-				raise InvalidGroup(group) from None
+			if group == "*":
+				if not owner:
+					raise InvalidOwnershipSyntax("default group without an owner")
+				group = None
+			else:
+				try:
+					grp.getgrnam(group)
+				except KeyError:
+					raise InvalidGroup(group) from None
 
 	if not owner:
 		owner = None
@@ -379,8 +438,11 @@ def parse_permissions(permissions):
 	if not permissions:
 		return None
 
-	# Ensure it's a string...
-	if not isinstance(permissions, type("")):
+	if isinstance(permissions, TYPE_LIST):
+		# It's a list, so do a comma-join
+		permissions = ",".join(permissions)
+	elif not isinstance(permissions, TYPE_STRING):
+		# Ensure it's a string...
 		raise InvalidPermissionSyntax("Not a string: %s" % str(permissions))
 
 	# First ... is it a file path? If so, check that it exists
@@ -395,7 +457,6 @@ def parse_permissions(permissions):
 		if not p:
 			bad.append(p)
 			continue
-		p = p.strip()
 		if not PERMISSIONS_PARSER.fullmatch(p):
 			bad.append(p)
 			continue
@@ -413,8 +474,10 @@ def parse_flags(flags):
 	if not flags:
 		return DEFAULT_FLAGS
 
-	if not isinstance(flags, type([])):
-		flags = [ flags ]
+	if isinstance(flags, TYPE_STRING):
+		flags = flags.split(",")
+	elif not isinstance(flags, TYPE_LIST):
+		flags = [ str(flags) ]
 
 	flagSet = {}
 	outputFlag = None
@@ -423,7 +486,7 @@ def parse_flags(flags):
 	bad = []
 	duplicates = []
 	for flag in flags:
-		if not isinstance(flag, type("")):
+		if not isinstance(flag, TYPE_STRING):
 			bad.append(flag)
 			continue
 
@@ -436,7 +499,7 @@ def parse_flags(flags):
 
 		v = True
 		if f.startswith("no"):
-			f = f[2:].strip()
+			f = f[2:]
 			v = False
 
 		if (DEFAULT_FLAGS.get(f) == None) or ((v == False) and OUTPUT_FLAGS.get(f)):
@@ -483,7 +546,7 @@ def validate_and_create_targets(targets, create=False):
 		raise TargetListEmpty()
 
 	# Make sure it's a list
-	if not isinstance(targets, type([])):
+	if not isinstance(targets, TYPE_LIST):
 		targets = [ targets ]
 
 	# Sanity check: take roll call of which targets don't exist
@@ -491,7 +554,7 @@ def validate_and_create_targets(targets, create=False):
 	invalid = []
 	relative = []
 	for tgt in targets:
-		if not isinstance(tgt, type("")):
+		if not isinstance(tgt, TYPE_STRING):
 			invalid.append(tgt)
 			continue
 
@@ -621,13 +684,14 @@ def process_job(job):
 		else:
 			xargs.append(ownership["ownership"])
 		debug("\tPOPEN Args for ownership: %s | %s", find, xargs)
-		pFind = subprocess.Popen(find, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE)
-		with pFind.stdout:
-			pXargs = subprocess.Popen(xargs, stdin=pFind.stdout)
-			rXargs = pXargs.wait()
-		rFind = pFind.wait()
-		if ((rFind != 0) or (rXargs != 0)) and ROOT:
-			raise CommandFailed("%s [find = %d, xargs = %d]" % (cmd, rFind, rXargs))
+		if not DRY_RUN:
+			pFind = subprocess.Popen(find, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE)
+			with pFind.stdout:
+				pXargs = subprocess.Popen(xargs, stdin=pFind.stdout)
+				rXargs = pXargs.wait()
+			rFind = pFind.wait()
+			if ((rFind != 0) or (rXargs != 0)) and ROOT:
+				raise CommandFailed("%s [find = %d, xargs = %d]" % (cmd, rFind, rXargs))
 	else:
 		debug("No targets identified for ownership changes")
 
@@ -652,13 +716,14 @@ def process_job(job):
 		else:
 			xargs.append(permissions)
 		debug("\tPOPEN Args for permissions: %s | %s", find, xargs)
-		pFind = subprocess.Popen(find, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE)
-		with pFind.stdout:
-			pXargs = subprocess.Popen(xargs, stdin=pFind.stdout)
-			rXargs = pXargs.wait()
-		rFind = pFind.wait()
-		if ((rFind != 0) or (rXargs != 0)) and ROOT:
-			raise CommandFailed("chmod [find = %d, xargs = %d]" % (rFind, rXargs))
+		if not DRY_RUN:
+			pFind = subprocess.Popen(find, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE)
+			with pFind.stdout:
+				pXargs = subprocess.Popen(xargs, stdin=pFind.stdout)
+				rXargs = pXargs.wait()
+			rFind = pFind.wait()
+			if ((rFind != 0) or (rXargs != 0)) and ROOT:
+				raise CommandFailed("chmod [find = %d, xargs = %d]" % (rFind, rXargs))
 	else:
 		debug("No targets identified for permission changes")
 
