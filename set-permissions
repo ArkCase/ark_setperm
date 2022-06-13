@@ -129,6 +129,9 @@ class TargetListEmpty(Exception):
 class AllTargetsReady(Exception):
 	pass
 
+class InvalidTarget(Exception):
+	pass
+
 class TargetNotAbsolutePath(Exception):
 	pass
 
@@ -462,17 +465,32 @@ def validate_and_create_targets(targets, create=False):
 	if not targets:
 		raise TargetListEmpty()
 
+	# Make sure it's a list
+	if not isinstance(targets, type([])):
+		targets = [ targets ]
+
 	# Sanity check: take roll call of which targets don't exist
 	missing = []
 	invalid = []
+	relative = []
 	for tgt in targets:
-		if not os.path.isabs(tgt):
+		if not isinstance(tgt, type("")):
 			invalid.append(tgt)
+			continue
+
+		if not os.path.isabs(tgt):
+			relative.append(tgt)
+			continue
+
 		if not os.path.exists(tgt):
 			missing.append(tgt)
+			continue
 
 	if invalid:
-		raise TargetNotAbsolutePath("%s" % (invalid))
+		raise InvalidTarget("%s" % (invalid))
+
+	if relative:
+		raise TargetNotAbsolutePath("%s" % (relative))
 
 	# If there are missing targets and we're not creating them, choke
 	if missing and not create:
@@ -670,6 +688,8 @@ if __name__ == "__main__":
 				fail("The file given for permissions reference could not be found for job # %d - cannot continue: [%s]" % (jobNum, str(e)))
 			except DuplicateFlag as e:
 				fail("Duplicate flag(s) given for job # %d - cannot continue: %s" % (jobNum, str(e)))
+			except InvalidTarget as e:
+				fail("These targets for job # %d were not given as strings - cannot continue: %s" % (jobNum, str(e)))
 			except TargetNotAbsolutePath as e:
 				fail("These targets for job # %d are not absolute paths - cannot continue: %s" % (jobNum, str(e)))
 			except FileNotFoundError as e:
