@@ -42,7 +42,7 @@ def debug(msg, *args):
 	print(msg % args)
 
 #
-# Set the debug mode
+# Check to see if we're allowed to run as non-root
 #
 ROOT = True
 try:
@@ -52,6 +52,10 @@ try:
 except KeyError:
 	# Do nothing - stick to the default value
 	pass
+
+if __name__ == "__main__":
+	if os.getuid() != 0 and ROOT:
+		print("WARNING: This script is meant to be run as root, otherwise it may not be able to do its job properly")
 
 #
 # Default group marker
@@ -221,6 +225,8 @@ if os.path.isfile(document):
 #
 try:
 	yamlData = load(document, Loader=Loader)
+	if not isinstance(yamlData, type({})):
+		fail("Bad YAML structure - must produce a dict:\n%s" % (yamlData))
 except Exception as e:
 	msg = ""
 	if hasattr(e, 'problem_mark'):
@@ -618,58 +624,56 @@ def process_job(job):
 # When we're called directly
 #
 if __name__ == "__main__":
-	if os.getuid() != 0 and ROOT:
-		print("WARNING: This script is meant to be run as root, otherwise it may not be able to do its job properly")
-
 	#
 	# Go through each job, and process it
 	#
-	jobNumber = 0
+	jobNum = 0
 	totalStart = time.perf_counter()
 	try:
 		for job in jobs:
 			#
 			# Process the job
 			#
-			jobNumber += 1
+			jobNum += 1
 			start = time.perf_counter()
 			try:
-				process_job(job)
+				print("Start processing job # %d" % (jobNum))
+				try:
+					process_job(job)
+				finally:
+					print("Processing for Job # %d finished after %s" % (jobNum, datetime.timedelta(time.perf_counter() - start)))
 			except TargetListEmpty as e:
-				print("The list of targets is empty for job # %d - skipping it" % (jobNumber))
+				print("The list of targets is empty for job # %d - skipping it" % (jobNum))
 				continue
 			except AllTargetsReady as e:
-				print("All the targets for job # %d already match the required state, skipping them" % (jobNumber))
+				print("All the targets for job # %d already match the required state, skipping them" % (jobNum))
 				continue
 			except InvalidFlag as e:
-				fail("Invalid flag(s) given for job # %d - cannot continue: %s" % (jobNumber, str(e)))
+				fail("Invalid flag(s) given for job # %d - cannot continue: %s" % (jobNum, str(e)))
 			except InvalidOwnershipSyntax as e:
-				fail("Invalid ownership data given for job # %d - cannot continue: [%s]" % (jobNumber, str(e)))
+				fail("Invalid ownership data given for job # %d - cannot continue: [%s]" % (jobNum, str(e)))
 			except InvalidOwner as e:
-				fail("Invalid owner given for job # %d - cannot continue: [%s]" % (jobNumber, str(e)))
+				fail("Invalid owner given for job # %d - cannot continue: [%s]" % (jobNum, str(e)))
 			except InvalidGroup as e:
-				fail("Invalid group given for job # %d - cannot continue: [%s]" % (jobNumber, str(e)))
+				fail("Invalid group given for job # %d - cannot continue: [%s]" % (jobNum, str(e)))
 			except MissingOwnershipReference as e:
-				fail("The file given for ownership reference could not be found for job # %d - cannot continue: [%s]" % (jobNumber, str(e)))
+				fail("The file given for ownership reference could not be found for job # %d - cannot continue: [%s]" % (jobNum, str(e)))
 			except InvalidPermissionSyntax as e:
-				fail("Invalid permission data given for job # %d - cannot continue: %s" % (jobNumber, str(e)))
+				fail("Invalid permission data given for job # %d - cannot continue: %s" % (jobNum, str(e)))
 			except MissingPermissionsReference as e:
-				fail("The file given for permissions reference could not be found for job # %d - cannot continue: [%s]" % (jobNumber, str(e)))
+				fail("The file given for permissions reference could not be found for job # %d - cannot continue: [%s]" % (jobNum, str(e)))
 			except DuplicateFlag as e:
-				fail("Duplicate flag(s) given for job # %d - cannot continue: %s" % (jobNumber, str(e)))
+				fail("Duplicate flag(s) given for job # %d - cannot continue: %s" % (jobNum, str(e)))
 			except TargetNotAbsolutePath as e:
-				fail("These targets for job # %d are not absolute paths - cannot continue: %s" % (jobNumber, str(e)))
+				fail("These targets for job # %d are not absolute paths - cannot continue: %s" % (jobNum, str(e)))
 			except FileNotFoundError as e:
-				fail("Some of the targets for job # %d are missing, and the create flag wasn't set: %s" % (jobNumber, str(e)))
+				fail("Some of the targets for job # %d are missing, and the create flag wasn't set: %s" % (jobNum, str(e)))
 			except CommandFailed as e:
-				fail("A chained command failed for job # %d: %s" % (jobNumber, str(e)))
+				fail("A chained command failed for job # %d: %s" % (jobNum, str(e)))
 			except Exception as e:
-				fail("Failed to process job # %d: %s" % (jobNumber, str(e)))
-			finally:
-				now = time.perf_counter()
-				print("Processing for Job %d finished after %s" % (jobNumber, datetime.timedelta(now - start)))
+				fail("Failed to process job # %d: %s" % (jobNum, str(e)))
 	finally:
 		now = time.perf_counter()
-		print("Processed %s jobs in %s" % (jobNumber, datetime.timedelta(now - start)))
+		print("Processed %s jobs in %s" % (jobNum, datetime.timedelta(now - start)))
 
 	sys.exit(0)
