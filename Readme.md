@@ -1,5 +1,12 @@
+# ArkCase Permissions Modification Tool
 
-Environment variables to deal with operation modes:
+This container provides an easy mechanism to apply permissions and ownership modification to volumes and filesystems. Specifically, it can be used when containers require the contents of their data volumes to be readable or writable by a specific user or group, or to have a specific set of permissions. The tool is intended to support high performance via leveraging parallelism, and it's also somewhat smart about avoiding unnecessary work (see the ***forced*** and ***noforced*** flags, below).
+
+The tool's activities are primarily controlled via environment variables, with a YAML document describing the work to be performed.
+
+## Environment Variables
+
+These are the environment variables that can modify the tool's operations:
 
 - **PARALLELISM=number**
 
@@ -17,7 +24,9 @@ Environment variables to deal with operation modes:
 
   Enable non-root mode. This may have an impact on the script's ability to perform its duties as non-root users have limited ability to change file ownership and permissions based on existing ownership and permissions. This is disabled by default (i.e. must run as root)
 
-This is an example document listing jobs. These will be specified via the environment variable **JOBS**. The environment variable may also point to a file containing this type of YAML:
+- **JOBS=(YAML|*file-path*)**
+
+  The **JOBS** variable can contain an entire YAML document, or the path to one which will be read and used to guid processing. This listing shows an example document:
 
 ```yaml
 jobs:
@@ -40,21 +49,29 @@ jobs:
     targets: [ "/some/dirN", "/another/dirN", ... ]
 ```
 
-**ownership**
+## Document Elements
+
+The document must start with a root array object called ***jobs***, which will contain all the work that needs to be performed. By splitting work into separate instances, a single invocation of the tool can be used to apply many different permissions modifications.
+
+In order for a *job* to perform any work, it must have at least one of ***ownership*** or ***permissions***, and at least one ***target***. Depending on the flags (specifically, ***forced*** and ***noforced***, below) the tool may select to skip the work anyway, but if there are no *targets*, or no *permissions* or *ownership* changes, then the job will be skipped since no work is being requested.
+
+Each *job* may contain the following elements:
+
+### **ownership**
 
 May be a string describing a user:group pair, or the path of a file/object whose ownership is to be mimicked. All components are optional. Here are some examples:
 
-- bob:admins (owner = bob, group = admins)
-- :editors (keep user, group = editors)
-- bill (owner = bill, keep group)
-- jim: (owner = jim, group = jim's default group)
-- /some/file/path (copy ownership from the given path, must be an absolute path, and it must exist)
+- **bob:admins** (owner = bob, group = admins)
+- **:editors** (keep user, group = editors)
+- **bill** (owner = bill, keep group)
+- **jim:** (owner = jim, group = *jim's default group*)
+- **/some/file/path** (copy ownership from the given path, must be an absolute path, and it must exist - both owner and group will be copied over)
 
-**permissions**
+### **permissions**
 
-May be a string describing a set of permissions to apply, as accepted by chmod, or the path of a file/object whose permissions are to be mimicked (must be an absolute path, and it must exist).
+May be a string describing a set of permissions to apply, as accepted by **chmod**, or the path of a file/object whose permissions are to be mimicked (must be an absolute path, and it must exist). The exact same syntax that **chmod** supports is accepted, and validated.
 
-**flags**
+### **flags**
 
 May be a combination of (\* marks flags enabled by default):
 
@@ -110,16 +127,21 @@ May be a combination of (\* marks flags enabled by default):
 
   don't 'traverse any symbolic links to directories encountered (***default***)
 
-**targets**
+Please note that the **quiet**, **changes**, and **verbose** are mutually exclusive and only one may be used at any given time. The same goes for flags that have a "*no*" variant - i.e. **traverse** and **notraverse** may not be used at the same time.
 
-The files or directories to which the requested actions should be applied.
+### **targets**
 
-In the end, the commands to be executed look like this (could be chown or chgrp, depending):
+This array contains the files or directories to which the requested actions should be applied. All paths may be absolute, and depending on the use of **create** or **nocreate**, they may have to exist beforehand. Note that when using **create**, only directories will be created.
+
+## Executed commands
+
+The commands to be executed take a form similar to the following:
 
 ```bash
 $ mkdir -p target1 [target2 ... targetN]  # only if the create flag is given
 $ find target1 [target2 ... targetN] | xargs -P ${PARALLEL} -n ${BATCH} chown-or-chgrp [flags] <ownership>
 $ find target1 [target2 ... targetN] | xargs -P ${PARALLEL} -n ${BATCH} chmod [flags] <mode>
 ```
+Depending on circumstances, the ownership command may be *chown* or *chgrp* - i.e. if only group changes are requested, *chgrp* is the appropriate tool to use.
 
-These commands would be executed using subprocess.Popen(...).
+These commands would be executed using subprocess.Popen(...), so that paths with spaces or strange characters can be processed adequately.
