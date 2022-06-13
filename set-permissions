@@ -289,6 +289,10 @@ def parse_ownership(ownership):
 	if not ownership:
 		return { "owner" : None, "group" : None }
 
+	# Ensure it's a string...
+	if not isinstance(ownership, type("")):
+		raise InvalidOwnershipSyntax("Not a string: %s" % str(ownership))
+
 	# We can set this early, and change later
 	command = "chown"
 
@@ -374,6 +378,10 @@ def parse_permissions(permissions):
 	# Parse the permissions string and make sure it's valid per chmod
 	if not permissions:
 		return None
+
+	# Ensure it's a string...
+	if not isinstance(permissions, type("")):
+		raise InvalidPermissionSyntax("Not a string: %s" % str(permissions))
 
 	# First ... is it a file path? If so, check that it exists
 	if permissions.startswith("/"):
