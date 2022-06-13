@@ -30,6 +30,7 @@ ENV NOROOT="False"
 # The jobs to run
 ENV JOBS=""
 
+RUN apt-get update && apt-get -y dist-upgrade && apt-get -y install python3-yaml
 COPY --chown=root:root set-permissions /
 RUN /usr/bin/chmod -R 750 /set-permissions
 
