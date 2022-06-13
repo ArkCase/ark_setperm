@@ -1,6 +1,7 @@
 
 Environment variables to deal with operation modes:
 
+```
 	PARALLELISM=<number>	The maximum number of parallel processes to use when running a task (chmod or chown). This is
 							important to accelerate processing. The default is 4. Minimum is 1, maximum is 10
 
@@ -13,9 +14,11 @@ Environment variables to deal with operation modes:
 	NOROOT=(True|False)		Enable non-root mode. This may have an impact on the script's ability to perform its duties
 							as non-root users have limited ability to change file ownership and permissions based on
 							existing ownership and permissions. This is disabled by default (i.e. must run as root)
+```
 
 This is an example document listing jobs. These will be specified via the environment variable "${JOBS}"
 
+```yaml
 jobs:
   - ownership: "ownership information 1"
     permissions: "permissions to set 1"
@@ -34,31 +37,32 @@ jobs:
     permissions: "permissions to set N"
     flags: [ "flagN.1", "flagN.2", "flagN.3", "flagN.4", ... ]
     targets: [ "/some/dirN", "/another/dirN", ... ]
+```
 
-ownership: may be a string describing a user:group pair, or the path of a file/object whose ownership is to be mimicked. All
-	components are optional.
+ownership: may be a string describing a user:group pair, or the path of a file/object whose ownership is to be mimicked. All components are optional. Here are some examples:
 
-		Examples:	"bob:admins", ":group2" (keep user, only change group), "bill" (change user, keep group), "jim:"
-					(set user to jim, and group to jim's default group), "/some/file/path" (copy details from the
-					given path, must be an absolute path)
+- bob:admins (owner = bob, group = admins)
+- :editors (keep user, group = editors)
+- bill (owner = bill, keep group)
+- jim: (owner = jim, group = jim's default group)
+- /some/file/path (copy ownership from the given path, must be an absolute path, and it must exist)
 
-permissions: may be a string describing a set of permissions to apply, as accepted by chmod, or the path of a file/object whose
-	permissions are to be mimicked.
+permissions: may be a string describing a set of permissions to apply, as accepted by chmod, or the path of a file/object whose permissions are to be mimicked (must be an absolute path, and it must exist).
 
 flags: may be a combination of (\* marks flags enabled by default):
-	\*	quiet		= no output
-		changes		= only output changes done
-		verbose		= enable the most verbose output
-	\*	recurse		= changes should be applied recursive (default)
-		norecurse	= changes should not be applied recursively
-		forced		= always perform the changes
-	\*	noforced	= only perform the changes when required (default)
-	\*	deref		= dereference symbolic links (default)
-		noderef		= do not dereference symbolic links
-		create		= create target directories if missing
-	\*	nocreate	= don't create target directories if missing (default)
-		traverse	= traverse any symbolic links to directories encountered
-	\*	notraverse	= don't 'traverse any symbolic links to directories encountered (default)
+- \*	quiet		= no output
+- 	changes		= only output changes done
+- 	verbose		= enable the most verbose output
+- \*	recurse		= changes should be applied recursive (default)
+- 	norecurse	= changes should not be applied recursively
+- 	forced		= always perform the changes
+- \*	noforced	= only perform the changes when required (default)
+- \*	deref		= dereference symbolic links (default)
+- 	noderef		= do not dereference symbolic links
+- 	create		= create target directories if missing
+- \*	nocreate	= don't create target directories if missing (default)
+- 	traverse	= traverse any symbolic links to directories encountered
+- \*	notraverse	= don't 'traverse any symbolic links to directories encountered (default)
 
 targets: the files or directories to which the action should be applied.
 
