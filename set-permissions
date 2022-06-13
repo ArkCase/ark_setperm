@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 
 TRUE_VALUES = { "true" : True, "yes" : True, "y" : True, "1" : True, "on" : True, "enabled" : True, "enable" : True }
 
@@ -706,7 +707,7 @@ if __name__ == "__main__":
 			except CommandFailed as e:
 				fail("A chained command failed for job # %d: %s" % (jobNum, str(e)))
 			except Exception as e:
-				fail("Failed to process job # %d: %s" % (jobNum, str(e)))
+				fail("Failed to process job # %d: %s\n%s" % (jobNum, str(e), traceback.format_exc()))
 	finally:
 		now = time.perf_counter()
 		print("Processed %s jobs in %s" % (jobNum, datetime.timedelta(now - start)))
