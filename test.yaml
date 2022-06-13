@@ -1,0 +1,23 @@
+jobs:
+  - ownership: ":998"
+    permissions: "u=rwX,g=rX,o="
+    flags: [ "quiet", "recurse",  "noforced", "deref", "create", "traverse" ]
+    targets: 
+      - "/home/diego/some/dir1"
+      - "/home/diego/another/dir1"
+  - ownership: "diego:docker"
+    permissions: "u=rX,g=rX,o=X"
+    flags: [ "verbose", "noforced", "create" ]
+    targets: [ "/home/diego/some/dir1", "/home/diego/another/dir1" ]
+#  - ownership: "ownership information 3"
+#    permissions: "permissions to set 3"
+#    flags: [ "create", "nocreate", "traverse", "notraverse" ]
+#    targets: [ "/some/dir3", "/another/dir3" ]
+#  - ownership: "ownership information 4"
+#    permissions: "permissions to set 4"
+#    flags: [ "quiet", "changes", "verbose", "recurse" ]
+#    targets: [ "/some/dir4", "/another/dir4" ]
+#  - ownership: "ownership information 5"
+#    permissions: "permissions to set 5"
+#    flags: [ "quiet", "changes", "verbose", "recurse" ]
+#    targets: [ "/some/dir5", "/another/dir5" ]
