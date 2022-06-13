@@ -1,0 +1,676 @@
+#!/usr/bin/env /usr/bin/python3
+#
+# On Alpine:
+#	$ apk add python3 py3-yaml
+#
+# On CentOS 7:
+#	$ yum install python PyYAML
+#
+
+
+#
+# Import the base libraries
+#
+import datetime
+import grp
+import os
+import pwd
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+
+TRUE_VALUES = { "true" : True, "yes" : True, "y" : True, "1" : True, "on" : True, "enabled" : True, "enable" : True }
+
+#
+# Set the debug mode
+#
+DEBUG = False
+try:
+	d = os.environ["DEBUG"].lower()
+	if TRUE_VALUES.get(d):
+		DEBUG = True
+except KeyError:
+	# Do nothing - stick to the default value
+	pass
+
+def debug(msg, *args):
+	if not DEBUG:
+		return None
+	print(msg % args)
+
+#
+# Set the debug mode
+#
+ROOT = True
+try:
+	nr = os.environ["NONROOT"].lower()
+	if TRUE_VALUES.get(d):
+		ROOT = False
+except KeyError:
+	# Do nothing - stick to the default value
+	pass
+
+#
+# Default group marker
+#
+DEFAULT_GROUP_MARKER = "<DEFAULT_GROUP>"
+
+#
+# For parsing permissions
+#
+PERMISSIONS_PARSER = re.compile("[ugoa]*([-+=]([rwxXst]*|[ugo]))+|[-+=][0-7]+")
+
+#
+# Set the parallelism
+#
+MIN_PARALLELISM = 1
+MAX_PARALLELISM = 16
+PARALLELISM = 4
+try:
+	p = os.environ["PARALLELISM"]
+	p = max(MIN_PARALLELISM, min(MAX_PARALLELISM, int(p)))
+	PARALLELISM = p
+except KeyError:
+	# Do nothing - stick to the default value
+	pass
+except ValueError as e:
+	debug("Invalid parallelism value [%s] - will use the default of %d", (p, PARALLELISM))
+
+OUTPUT_FLAGS = { "quiet" : True, "verbose" : True, "changes" : True }
+DEFAULT_FLAGS = { "quiet" : True, "changes" : False, "verbose" : False, "recurse" : True, "forced" : False, "deref" : True, "create" : False, "traverse" : False }
+
+# The above flags map as follows:
+#
+# quiet		-> --quiet
+# changes	-> --changes
+# verbose	-> --verbose
+# recurse	-> --recursive
+# noderef	-> --no-dereference (only applies to chown/chgrp)
+# traverse	-> -L (only applies to chown/chgrp)
+
+COMMON_FLAG_PARAMETERS = { "quiet" : "--quiet", "changes" : "--changes", "verbose" : "--verbose", "recurse" : "--recursive" }
+OWNERSHIP_FLAG_PARAMETERS = { "noderef" : "--no-dereference", "traverse" : "-L" }
+PERMISSION_FLAG_PARAMETERS = { }
+
+class InvalidFlag(Exception):
+	pass
+
+class DuplicateFlag(Exception):
+	pass
+
+class InvalidOwnershipSyntax(Exception):
+	pass
+
+class InvalidOwner(Exception):
+	pass
+
+class InvalidGroup(Exception):
+	pass
+
+class MissingOwnershipReference(Exception):
+	pass
+
+class InvalidPermissionSyntax(Exception):
+	pass
+
+class MissingPermissionsReference(Exception):
+	pass
+
+class TargetListEmpty(Exception):
+	pass
+
+class AllTargetsReady(Exception):
+	pass
+
+class TargetNotAbsolutePath(Exception):
+	pass
+
+class CommandFailed(Exception):
+	pass
+
+def fail(message, exitCode = 1):
+	print(message)
+	sys.exit(exitCode)
+
+#
+# Set the batch size
+#
+MIN_BATCH_SIZE = 100
+MAX_BATCH_SIZE = 10000
+BATCH_SIZE = 1000
+try:
+	b = os.environ["BATCH_SIZE"]
+	b = max(MIN_BATCH_SIZE, min(MAX_BATCH_SIZE, int(b)))
+	BATCH_SIZE = b
+except KeyError:
+	# Do nothing - stick to the default value
+	pass
+except ValueError as e:
+	debug("Invalid batch size value [%s] - will use the default of %d", (b, BATCH_SIZE))
+
+#
+# Import the YAML library
+#
+from yaml import load, dump
+try:
+	from yaml import CLoader as Loader, CDumper as Dumper
+except ImportError:
+	from yaml import Loader, Dumper
+
+#
+# Find the requisite executables
+#
+candidateExes = [ "chown", "chgrp", "chmod", "find", "xargs" ]
+candidateDirs = [ "/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/local/bin", "/usr/local/sbin" ]
+exes = {}
+failed = []
+for exe in candidateExes:
+	winner = ""
+	# First check to see if it's in one of the expected locations
+	for dir in candidateDirs:
+		path = "%s/%s" % (dir, exe)
+		try:
+			if not stat.S_ISREG(os.stat(path).st_mode):
+				continue
+			if not os.access(path, os.R_OK):
+				continue
+			if not os.access(path, os.X_OK):
+				continue
+			winner = path
+			break
+		except FileNotFoundError:
+			continue
+	# If it's not in the candidate directories, scour the whole path
+	if not winner:
+		winner = shutil.which(exe)
+	# If it's found, stash it. Otherwise, mark it as failed
+	if winner:
+		exes[exe] = winner
+	else:
+		failed.append(exe)
+
+if failed:
+	print("The following executables are required, but missing: %s" % (failed))
+	fail("They were searched for in the following directories: %s" % (candidateDirs))
+
+#
+# Now load the job data
+#
+try:
+	document = os.environ["JOBS"].strip()
+except KeyError:
+	fail("The JOBS variable has not been set. Cannot continue.")
+
+#
+# Make sure the string isn't empty
+#
+if "" == document:
+	fail("The JOBS variable is empty. Cannot continue.")
+
+#
+# First things first: does it point to a file somewhere? If so, use that ...
+#
+if os.path.isfile(document):
+	document = open(document)
+
+#
+# Now parse the list of jobs that we have to run
+#
+try:
+	yamlData = load(document, Loader=Loader)
+except Exception as e:
+	msg = ""
+	if hasattr(e, 'problem_mark'):
+		mark = e.problem_mark
+		msg = "YAML syntax error in the configuration data at line %s, column %s:\n%s" % (mark.line + 1, mark.column + 1, document)
+	else:
+		msg = "Failed to parse the YAML data:%s\n%s" % (str(e), document)
+	fail(msg)
+finally:
+	# Clean up if necessary
+	if not isinstance(document, type("")):
+		document.close()
+
+#
+# Ok so the YAML seems to be OK... double check the object retrieved
+#
+try:
+	jobs = yamlData["jobs"]
+except KeyError:
+	fail("YAML Data is improperly structured - must start with a 'jobs:' array")
+
+#
+# Make sure that things at least appear to be in order
+#
+if not isinstance(jobs, type([])):
+	fail("YAML Data is improperly structured - must start with a 'jobs:' array")
+
+def needs_changes(tgt, ownership, permissions, statDir, statFile):
+	statInfo = os.stat(tgt)
+	pattern = statDir
+	if stat.S_ISREG(statInfo.st_mode):
+		pattern = statFile
+
+	result = 0
+	if ownership:
+		# Only consider user mismatches if we're potentially changing them, otherwise
+		# we're only considering groups
+		if (ownership["command"] != "chgrp") and (pattern.st_uid != statInfo.st_uid):
+			debug("Target [%s] needs owner changes from %d to %d", tgt, statInfo.st_uid, pattern.st_uid)
+			result |= 1
+
+		if (pattern.st_gid != statInfo.st_gid):
+			debug("Target [%s] needs group changes from %d to %d", tgt, statInfo.st_gid, pattern.st_gid)
+			result |= 2
+
+	if permissions:
+		want = stat.filemode(pattern.st_mode)
+		has = stat.filemode(statInfo.st_mode)
+		if (want != has):
+			debug("Target [%s] needs mode changes from %s to %s", tgt, has, want)
+			result |= 4
+
+	return result
+
+def parse_ownership(ownership):
+	if not ownership:
+		return { "owner" : None, "group" : None }
+
+	# We can set this early, and change later
+	command = "chown"
+
+	# First ... is it a file path? If so, check that it exists
+	if ownership.startswith("/"):
+		if not os.exists(ownership):
+			raise MissingOwnershipReference(ownership)
+		return { "ownership" : ownership, "command" : command }
+
+	# Valid formats:
+	# 	owner		-> chown
+	# 	owner:		-> chown
+	# 	owner:group	-> chown
+	# 	:group		-> chgrp
+	#
+	# Owners or groups may be string (the name) or a number
+	data = ownership.split(":")
+	if (len(data) > 2):
+		raise InvalidOwnershipSyntax(ownership)
+
+	groupGiven = False
+	if (len(data) < 2):
+		owner = data[0]
+		group = None
+	else:
+		( owner, group ) = data
+		groupGiven = True
+
+	if not group:
+		group = None
+	else:
+		try:
+			group = int(group)
+			if (group < 0):
+				# Negative group IDs aren't supported
+				raise InvalidGroup(str(group))
+			group = str(group)
+		except ValueError:
+			# Not a number, so must be a string ... check to see if the group exists
+			try:
+				grp.getgrnam(group)
+			except KeyError:
+				raise InvalidGroup(group) from None
+
+	if not owner:
+		owner = None
+	else:
+		try:
+			owner = int(owner)
+			if (owner < 0):
+				# Negative owner IDs aren't supported
+				raise InvalidOwner(str(owner))
+			owner = str(owner)
+		except ValueError:
+			# Not a number, so must be a string ... check to see if the user exists
+			try:
+				pwd.getpwnam(owner)
+			except KeyError:
+				raise InvalidOwner(owner) from None
+
+		# The group was given as the empty string, and thus we must use the user's default
+		# group
+		if groupGiven and (group == None):
+			group = DEFAULT_GROUP_MARKER
+
+	if owner:
+		if not group:
+			ownership = owner
+		elif (group == DEFAULT_GROUP_MARKER):
+			ownership = "%s:" % (owner)
+		else:
+			ownership = "%s:%s" % (owner, group)
+	elif group:
+		command = "chgrp"
+		ownership = group
+	else:
+		return None
+
+	debug("Ownership changes will happen with %s, to [%s]", command, ownership)
+	return { "ownership" : ownership, "command" : command }
+
+def parse_permissions(permissions):
+	# Parse the permissions string and make sure it's valid per chmod
+	if not permissions:
+		return None
+
+	# First ... is it a file path? If so, check that it exists
+	if permissions.startswith("/"):
+		if not os.exists(permissions):
+			raise MissingPermissionsReference(permissions)
+		return permissions
+
+	result = []
+	bad = []
+	for p in permissions.split(","):
+		if not p:
+			bad.append(p)
+			continue
+		p = p.strip()
+		if not PERMISSIONS_PARSER.fullmatch(p):
+			bad.append(p)
+			continue
+		result.append(p)
+
+	if bad:
+		raise InvalidPermissionSyntax(str(bad))
+
+	if not result:
+		return None
+
+	return ",".join(result)
+
+def parse_flags(flags):
+	if not flags:
+		return DEFAULT_FLAGS
+
+	flagSet = {}
+	outputFlag = None
+	flags = list(dict.fromkeys(flags))
+	flags.sort()
+	bad = []
+	duplicates = []
+	for flag in flags:
+		f = flag.lower()
+		f = f.strip()
+
+		if not f:
+			bad.append(flag)
+			continue
+
+		v = True
+		if f.startswith("no"):
+			f = f[2:].strip()
+			v = False
+
+		if (DEFAULT_FLAGS.get(f) == None) or ((v == False) and OUTPUT_FLAGS.get(f)):
+			bad.append(flag)
+			continue
+
+		if (flagSet.get(f) != None):
+			duplicates.append(flag)
+			continue
+
+		if OUTPUT_FLAGS.get(f):
+			if outputFlag:
+				duplicates.append(flag)
+				continue
+			outputFlag = f
+
+		flagSet[f] = v
+
+	if outputFlag:
+		for of in OUTPUT_FLAGS:
+			flagSet[of] = (of == outputFlag)
+
+	if bad:
+		raise InvalidFlag(str(bad))
+	if duplicates:
+		raise DuplicateFlag(str(duplicates))
+
+	# Now merge the two flag maps
+	return { **DEFAULT_FLAGS, **flagSet }
+
+def build_operation(job):
+	ownership = parse_ownership(job.get("ownership"))
+	permissions = parse_permissions(job.get("permissions"))
+	flags = parse_flags(job.get("flags"))
+
+	op = { "flags" : flags, "ownership" : ownership, "permissions" : permissions }
+
+	return op
+
+def validate_and_create_targets(targets, create=False):
+	# Sanity check: is the list of targets valid?
+	if not targets:
+		raise TargetListEmpty()
+
+	# Sanity check: take roll call of which targets don't exist
+	missing = []
+	invalid = []
+	for tgt in targets:
+		if not os.path.isabs(tgt):
+			invalid.append(tgt)
+		if not os.path.exists(tgt):
+			missing.append(tgt)
+
+	if invalid:
+		raise TargetNotAbsolutePath("%s" % (invalid))
+
+	# If there are missing targets and we're not creating them, choke
+	if missing and not create:
+		raise FileNotFoundError("%s" % (missing))
+	elif missing:
+		# We have missing folders that need creating ... create them!
+		# We don't worry about ownership and permissions yet ... those will be
+		# fixed later
+		debug("Will create the following missing targets: %s", str(missing))
+		for dir in missing:
+			os.makedirs(dir, 0o750, False)
+
+	return targets
+
+def remove_unnecessary_targets(targets, op):
+	#
+	# Check ownership and permissions on each target to see if they match
+	# what they're supposed to look like. One easy way to do it is to just
+	# apply the permissions to some temporary file, and then use that as a
+	# comparison point. Alternatively we could also use that file as a
+	# --reference . We should make a file AND a directory, because some chmod
+	# flags may change the applied permissions depending on whether the target
+	# is a file or a directory
+	#
+	flags = op["flags"]
+	ownership = op["ownership"]
+	permissions = op["permissions"]
+
+	# If we're going to do them all regardless, perform no further checks
+	if flags["forced"]:
+		return { "ownership" : targets, "permissions" : targets }
+
+	# First, do the example file
+	try:
+		exampleDir = tempfile.mkdtemp()
+		exampleFile = tempfile.mkstemp()
+		os.close(exampleFile[0])
+		exampleFile = exampleFile[1]
+
+		# Apply ownership to both the file and directory
+		if ownership:
+			args = [ exes[ownership["command"]], ownership["ownership"], exampleFile, exampleDir ]
+			ret = subprocess.run(args, stderr=subprocess.STDOUT)
+			if ret.returncode:
+				raise CommandFailed(args)
+
+		if permissions:
+			args = [ exes["chmod"], permissions, exampleFile, exampleDir ]
+			ret = subprocess.run(args, stderr=subprocess.STDOUT)
+			if ret.returncode:
+				raise CommandFailed(args)
+
+		statDir = os.stat(exampleDir)
+		statFile = os.stat(exampleFile)
+
+		# Compare the targets to the examples ...
+		ownershipTargets = []
+		permissionTargets = []
+		for tgt in targets:
+			r = needs_changes(tgt, ownership, permissions, statDir, statFile)
+			if r == 0:
+				continue
+
+			if ownership and ((r & 1) or (r & 2)):
+				ownershipTargets.append(tgt)
+
+			if permissions and (r & 4):
+				permissionTargets.append(tgt)
+
+		debug("\tOwnership Targets = %s", str(ownershipTargets))
+		debug("\tPermissions Targets = %s", str(permissionTargets))
+		return { "ownership" : ownershipTargets, "permissions" : permissionTargets }
+	finally:
+		if exampleDir:
+			try:
+				os.rmdir(exampleDir)
+			except:
+				pass
+
+		if exampleFile:
+			try:
+				os.unlink(exampleFile)
+			except:
+				pass
+
+def process_job(job):
+	op = build_operation(job)
+	targets = validate_and_create_targets(job["targets"], op["flags"]["create"])
+	targets = remove_unnecessary_targets(targets, op)
+
+	ownership = op["ownership"]
+	if ownership:
+		cmd = exes[ownership["command"]]
+		find = [ exes["find"] ] + targets["ownership"]
+		xargs = [ exes["xargs"], "-P", str(PARALLELISM), "-n", str(BATCH_SIZE), cmd, "--preserve-root" ]
+		for f in op["flags"]:
+			if not op["flags"][f]:
+				continue
+			p = COMMON_FLAG_PARAMETERS.get(f)
+			if p:
+				xargs.append(p)
+				continue
+			p = OWNERSHIP_FLAG_PARAMETERS.get(f)
+			if p:
+				xargs.append(p)
+				continue
+		if ownership["ownership"].startswith("/"):
+			xargs.append("--reference=%s" % (ownership["ownership"]))
+		else:
+			xargs.append(ownership["ownership"])
+		debug("\tPOPEN Args for ownership: %s | %s", find, xargs)
+		pFind = subprocess.Popen(find, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE)
+		with pFind.stdout:
+			pXargs = subprocess.Popen(xargs, stdin=pFind.stdout)
+			rXargs = pXargs.wait()
+		rFind = pFind.wait()
+		if ((rFind != 0) or (rXargs != 0)) and ROOT:
+			raise CommandFailed("%s [find = %d, xargs = %d]" % (cmd, rFind, rXargs))
+
+	permissions = op["permissions"]
+	if permissions:
+		find = [ exes["find"] ] + targets["permissions"]
+		xargs = [ exes["xargs"], "-P", str(PARALLELISM), "-n", str(BATCH_SIZE), exes["chmod"], "--preserve-root" ]
+		for f in op["flags"]:
+			if not op["flags"][f]:
+				continue
+			p = COMMON_FLAG_PARAMETERS.get(f)
+			if p:
+				xargs.append(p)
+				continue
+			p = PERMISSION_FLAG_PARAMETERS.get(f)
+			if p:
+				xargs.append(p)
+				continue
+		if permissions.startswith("/"):
+			xargs.append("--reference=%s" % (permissions))
+		else:
+			xargs.append(permissions)
+		debug("\tPOPEN Args for permissions: %s | %s", find, xargs)
+		pFind = subprocess.Popen(find, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE)
+		with pFind.stdout:
+			pXargs = subprocess.Popen(xargs, stdin=pFind.stdout)
+			rXargs = pXargs.wait()
+		rFind = pFind.wait()
+		if ((rFind != 0) or (rXargs != 0)) and ROOT:
+			raise CommandFailed("chmod [find = %d, xargs = %d]" % (rFind, rXargs))
+
+#
+# When we're called directly
+#
+if __name__ == "__main__":
+	if os.getuid() != 0 and ROOT:
+		print("WARNING: This script is meant to be run as root, otherwise it may not be able to do its job properly")
+
+	#
+	# Go through each job, and process it
+	#
+	jobNumber = 0
+	totalStart = time.perf_counter()
+	try:
+		for job in jobs:
+			#
+			# Process the job
+			#
+			jobNumber += 1
+			start = time.perf_counter()
+			try:
+				process_job(job)
+			except TargetListEmpty as e:
+				print("The list of targets is empty for job # %d - skipping it" % (jobNumber))
+				continue
+			except AllTargetsReady as e:
+				print("All the targets for job # %d already match the required state, skipping them" % (jobNumber))
+				continue
+			except InvalidFlag as e:
+				fail("Invalid flag(s) given for job # %d - cannot continue: %s" % (jobNumber, str(e)))
+			except InvalidOwnershipSyntax as e:
+				fail("Invalid ownership data given for job # %d - cannot continue: [%s]" % (jobNumber, str(e)))
+			except InvalidOwner as e:
+				fail("Invalid owner given for job # %d - cannot continue: [%s]" % (jobNumber, str(e)))
+			except InvalidGroup as e:
+				fail("Invalid group given for job # %d - cannot continue: [%s]" % (jobNumber, str(e)))
+			except MissingOwnershipReference as e:
+				fail("The file given for ownership reference could not be found for job # %d - cannot continue: [%s]" % (jobNumber, str(e)))
+			except InvalidPermissionSyntax as e:
+				fail("Invalid permission data given for job # %d - cannot continue: %s" % (jobNumber, str(e)))
+			except MissingPermissionsReference as e:
+				fail("The file given for permissions reference could not be found for job # %d - cannot continue: [%s]" % (jobNumber, str(e)))
+			except DuplicateFlag as e:
+				fail("Duplicate flag(s) given for job # %d - cannot continue: %s" % (jobNumber, str(e)))
+			except TargetNotAbsolutePath as e:
+				fail("These targets for job # %d are not absolute paths - cannot continue: %s" % (jobNumber, str(e)))
+			except FileNotFoundError as e:
+				fail("Some of the targets for job # %d are missing, and the create flag wasn't set: %s" % (jobNumber, str(e)))
+			except CommandFailed as e:
+				fail("A chained command failed for job # %d: %s" % (jobNumber, str(e)))
+			except Exception as e:
+				fail("Failed to process job # %d: %s" % (jobNumber, str(e)))
+			finally:
+				now = time.perf_counter()
+				print("Processing for Job %d finished after %s" % (jobNumber, datetime.timedelta(now - start)))
+	finally:
+		now = time.perf_counter()
+		print("Processed %s jobs in %s" % (jobNumber, datetime.timedelta(now - start)))
+
+	sys.exit(0)
