@@ -547,7 +547,7 @@ def validate_and_create_targets(targets, create=False):
 
 	# Make sure it's a list
 	if not isinstance(targets, TYPE_LIST):
-		targets = [ targets ]
+		targets = [ str(targets) ]
 
 	# Sanity check: take roll call of which targets don't exist
 	missing = []

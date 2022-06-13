@@ -80,9 +80,11 @@ ownership:
   reference: "/the/file/to/be/referenced/for/ownership"
 ```
 
+When using this form, you may only specify the *owner* and *group*, **or** the *reference*, but not both at the same time (because it makes no sense). You can use the special value **asterisk (i.e. *)** in the *group* to indicate that the owner's default group should be used (this implies that a valid owner must also be given).
+
 ### **permissions**
 
-May be a string describing a set of permissions to apply, as accepted by **chmod**, or the path of a file/object whose permissions are to be mimicked (must be an absolute path, and it must exist). The exact same syntax that **chmod** supports is accepted, and validated.
+May be a string, or an array of strings, describing a set of permissions to apply, as accepted by **chmod**, or the path of a file/object whose permissions are to be mimicked (must be an absolute path, and it must exist). The exact same syntax that **chmod** supports is accepted, and validated. If using an array, each item must be one permission change (i.e. no commas). If using a single string, use one just as you would for **chmod** (i.e. comma-separated list of changes)
 
 ### **flags**
 
@@ -144,7 +146,7 @@ Please note that the **quiet**, **changes**, and **verbose** are mutually exclus
 
 ### **targets**
 
-This array contains the files or directories to which the requested actions should be applied. All paths may be absolute, and depending on the use of **create** or **nocreate**, they may have to exist beforehand. Note that when using **create**, only directories will be created.
+This is either a string with the absolute path of the file or directory to apply the changes to, or an array containing many of them. All paths must be absolute, and depending on the use of **create** or **nocreate**, they may have to exist beforehand or may be *created* during processing. Note that when using **create**, only directories will be created.
 
 ## Executed commands
 
