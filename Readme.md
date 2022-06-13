@@ -1,22 +1,12 @@
 
 Environment variables to deal with operation modes:
 
-```
-	PARALLELISM=<number>	The maximum number of parallel processes to use when running a task (chmod or chown). This is
-							important to accelerate processing. The default is 4. Minimum is 1, maximum is 10
+- **PARALLELISM=<number>**	The maximum number of parallel processes to use when running a task (chmod or chown). This is important to accelerate processing. The default is 4. Minimum is 1, maximum is 10
+- **BATCH_SIZE=<number>**		The size of each parallel batch to be processed. A batch's contents are processed in order, but when running in parallel multiple batches are run at the same time. The default is 1,000.
+- **DEBUG=(True|False)**		Enable debug mode, which causes additional output to view what the script is thinking/doing (this is False by default)
+- **NOROOT=(True|False)**		Enable non-root mode. This may have an impact on the script's ability to perform its duties as non-root users have limited ability to change file ownership and permissions based on existing ownership and permissions. This is disabled by default (i.e. must run as root)
 
-	BATCH_SIZE=<number>		The size of each parallel batch to be processed. A batch's contents are processed in order, but
-							when running in parallel multiple batches are run at the same time. The default is 1,000.
-
-	DEBUG=(True|False)		Enable debug mode, which causes additional output to view what the script is thinking/doing
-							(this is False by default)
-
-	NOROOT=(True|False)		Enable non-root mode. This may have an impact on the script's ability to perform its duties
-							as non-root users have limited ability to change file ownership and permissions based on
-							existing ownership and permissions. This is disabled by default (i.e. must run as root)
-```
-
-This is an example document listing jobs. These will be specified via the environment variable "${JOBS}"
+This is an example document listing jobs. These will be specified via the environment variable **JOBS**. The environment variable may also point to a file containing this type of YAML:
 
 ```yaml
 jobs:
@@ -39,7 +29,7 @@ jobs:
     targets: [ "/some/dirN", "/another/dirN", ... ]
 ```
 
-ownership: may be a string describing a user:group pair, or the path of a file/object whose ownership is to be mimicked. All components are optional. Here are some examples:
+**ownership**: may be a string describing a user:group pair, or the path of a file/object whose ownership is to be mimicked. All components are optional. Here are some examples:
 
 - bob:admins (owner = bob, group = admins)
 - :editors (keep user, group = editors)
@@ -47,9 +37,9 @@ ownership: may be a string describing a user:group pair, or the path of a file/o
 - jim: (owner = jim, group = jim's default group)
 - /some/file/path (copy ownership from the given path, must be an absolute path, and it must exist)
 
-permissions: may be a string describing a set of permissions to apply, as accepted by chmod, or the path of a file/object whose permissions are to be mimicked (must be an absolute path, and it must exist).
+**permissions**: may be a string describing a set of permissions to apply, as accepted by chmod, or the path of a file/object whose permissions are to be mimicked (must be an absolute path, and it must exist).
 
-flags: may be a combination of (\* marks flags enabled by default):
+**flags**: may be a combination of (\* marks flags enabled by default):
 - \*	quiet		= no output
 - 	changes		= only output changes done
 - 	verbose		= enable the most verbose output
@@ -68,8 +58,10 @@ targets: the files or directories to which the action should be applied.
 
 In the end, the commands to be executed look like this (could be chown or chgrp, depending):
 
-		$ mkdir -p target1 [target2 ... targetN]  # only if the create flag is given
-		$ find target1 [target2 ... targetN] | xargs -P ${PARALLEL} -n ${BATCH} chown [flags] <ownership>
-		$ find target1 [target2 ... targetN] | xargs -P ${PARALLEL} -n ${BATCH} chmod [flags] <mode>
+```bash
+$ mkdir -p target1 [target2 ... targetN]  # only if the create flag is given
+$ find target1 [target2 ... targetN] | xargs -P ${PARALLEL} -n ${BATCH} chown [flags] <ownership>
+$ find target1 [target2 ... targetN] | xargs -P ${PARALLEL} -n ${BATCH} chmod [flags] <mode>
+```
 
-These commands would be executed using subprocess.Popen(...) to facilitate piping.
+These commands would be executed using subprocess.Popen(...).
