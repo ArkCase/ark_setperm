@@ -34,18 +34,22 @@ These are the environment variables that can modify the tool's operations:
 
 ```yaml
 jobs:
+  # First form
   - ownership: "ownership information 1"
     permissions: "permissions to set 1"
     flags: [ "flag1.1", "flag1.2", "flag1.3", "flag1.4", ... ]
     targets: [ "/some/dir1", "/another/dir1", ... ]
-  - ownership: "ownership information 2"
-    permissions: "permissions to set 2"
-    flags: [ "flag2.1", "flag2.2", "flag2.3", "flag2.4", ... ]
-    targets: [ "/some/dir2", "/another/dir2", ... ]
-  - ownership: "ownership information 3"
-    permissions: "permissions to set 3"
-    flags: [ "flag3.1", "flag3.2", "flag3.3", "flag3.4", ... ]
-    targets: [ "/some/dir3", "/another/dir3", ... ]
+  # Alternate form (may mix and match the two)
+  - ownership:
+      owner: "(name|id)"
+      group: "(name|id|*)"
+      reference: "/path/to/file"
+    permissions:
+      - "u=rwX"
+      - "g=rX"
+      - "o="
+    flags: "flag1,flag2,flag3,...,flagN"
+    targets: "/only/one/target/for/this/job"
   # ...
   - ownership: "ownership information N"
     permissions: "permissions to set N"
@@ -80,11 +84,13 @@ ownership:
   reference: "/the/file/to/be/referenced/for/ownership"
 ```
 
-When using this form, you may only specify the *owner* and *group*, **or** the *reference*, but not both at the same time (because it makes no sense). You can use the special value **asterisk (i.e. *)** in the *group* to indicate that the owner's default group should be used (this implies that a valid owner must also be given).
+When using this form, you may only specify the *owner* and *group*, **or** the *reference*, but not both at the same time (because that makes no sense). The *group* entry can have the special value "**\***" to indicate that the owner's default group should be used, but then the *owner* value must also be present and valid.
 
 ### **permissions**
 
-May be a string, or an array of strings, describing a set of permissions to apply, as accepted by **chmod**, or the path of a file/object whose permissions are to be mimicked (must be an absolute path, and it must exist). The exact same syntax that **chmod** supports is accepted, and validated. If using an array, each item must be one permission change (i.e. no commas). If using a single string, use one just as you would for **chmod** (i.e. comma-separated list of changes)
+May be a string, or an array of strings, describing a set of permissions to apply, as accepted by **chmod**, or the path of a file/object whose permissions are to be mimicked (must be an absolute path, and it must exist). The exact same syntax that **chmod** supports is accepted, and validated. If using an array, each item must be one permission change (i.e. no commas are accepted). If using a single string, use one just as you would for **chmod** (i.e. comma-separated list of changes).
+
+The program uses the same regular expression that **chmod** uses to validate each permissions change requested: `[ugoa]*([-+=]([rwxXst]*|[ugo]))+|[-+=][0-7]+`
 
 ### **flags**
 
@@ -153,9 +159,9 @@ This is either a string with the absolute path of the file or directory to apply
 The commands to be executed take a form similar to the following:
 
 ```bash
-$ mkdir -p target1 [target2 ... targetN]  # only if the create flag is given
-$ find target1 [target2 ... targetN] | xargs -P ${PARALLEL} -n ${BATCH} chown-or-chgrp [flags] <ownership>
-$ find target1 [target2 ... targetN] | xargs -P ${PARALLEL} -n ${BATCH} chmod [flags] <mode>
+mkdir -p target1 [target2 ... targetN]  # only if the create flag is given
+find target1 [target2 ... targetN] | xargs -P ${PARALLEL} -n ${BATCH} chown-or-chgrp [flags] <ownership>
+find target1 [target2 ... targetN] | xargs -P ${PARALLEL} -n ${BATCH} chmod [flags] <mode>
 ```
 Depending on circumstances, the ownership command may be *chown* or *chgrp* - i.e. if only group changes are requested, *chgrp* is the appropriate tool to use.
 
