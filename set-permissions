@@ -88,6 +88,11 @@ DEFAULT_GROUP_MARKER = "<DEFAULT_GROUP>"
 PERMISSIONS_PARSER = re.compile("[ugoa]*([-+=]([rwxXst]*|[ugo]))+|[-+=][0-7]+")
 
 #
+# For checking if the JOBS variable contains YAML
+#
+JOBS_PARSER = re.compile("^\s*jobs\s*:")
+
+#
 # Set the parallelism
 #
 MIN_PARALLELISM = 1
@@ -238,26 +243,27 @@ if "" == document:
 	fail("The JOBS variable is empty. Cannot continue.")
 
 #
-# First things first: does it point to a file somewhere? If so, use that ...
+# First things first: is it YAML?
 #
-url = urllib.parse.urlparse(document)
-if url.scheme:
-	# It's a URL ... so open it as such
-	try:
-		document = urllib.request.urlopen(document, timeout=300)
-	except Exception as e:
-		fail("Failed to open the jobs from URL [%s] -> %s: %s" % (document, url, str(e)))
-elif os.path.isfile(document):
-	# Not a URL, but it's a path ... so open it
-	document = open(document)
+if not JOBS_PARSER.match(document.strip()):
+	# Not YAML ... a url, maybe?
+	url = urllib.parse.urlparse(document)
+	if url.scheme:
+		# It's a URL ... so open it as such
+		try:
+			document = urllib.request.urlopen(document, timeout=300)
+		except Exception as e:
+			fail("Failed to open the jobs from URL [%s] -> %s: %s" % (document, url, str(e)))
+	elif os.path.isfile(document):
+		# Not a URL, but it must be a path ... so open it
+		try:
+			document = open(document)
+		except Exception as e:
+			fail("Failed to open the jobs from the file [%s]: %s" % (document, str(e)))
 
 #
 # At this point "document" carries either the YAML to be parsed, or a stream from
-# which to parse it
-#
-
-#
-# Now parse the list of jobs that we have to run
+# which to parse it, so we parse the list of jobs that we have to run from it
 #
 try:
 	yamlData = load(document, Loader=Loader)
