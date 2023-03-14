@@ -1,14 +1,15 @@
+ARG ARCH="amd64"
+ARG OS="linux"
+ARG VER="1.0.1"
+
 FROM ubuntu:latest
 
 #
 # Basic Parameters
 #
-ARG ARCH="amd64"
-ARG OS="linux"
-ARG VER="1.0.1"
-ARG PKG="set-permissions"
-ARG SRC="${PKG}-${VER}.${OS}-${ARCH}"
-ARG UID="0"
+ARG ARCH
+ARG OS
+ARG VER
 
 #
 # Some important labels
@@ -37,6 +38,5 @@ RUN /usr/bin/chmod -R 750 /set-permissions
 #
 # Final parameters
 #
-VOLUME      [ "/app" ]
 WORKDIR     /
 ENTRYPOINT  [ "/set-permissions" ]
