@@ -672,8 +672,8 @@ def process_job(job):
 	targets = allTargets["ownership"]
 	if ownership and targets:
 		cmd = exes[ownership["command"]]
-		find = [ exes["find"] ] + targets
-		xargs = [ exes["xargs"], "-P", str(PARALLELISM), "-n", str(BATCH_SIZE), cmd, "--preserve-root" ]
+		find = [ exes["find"] ] + targets + [ "-print0" ]
+		xargs = [ exes["xargs"], "-0", "-P", str(PARALLELISM), "-n", str(BATCH_SIZE), cmd, "--preserve-root" ]
 		for f in op["flags"]:
 			if not op["flags"][f]:
 				continue
@@ -704,8 +704,8 @@ def process_job(job):
 	permissions = op["permissions"]
 	targets = allTargets["permissions"]
 	if permissions and targets:
-		find = [ exes["find"] ] + targets
-		xargs = [ exes["xargs"], "-P", str(PARALLELISM), "-n", str(BATCH_SIZE), exes["chmod"], "--preserve-root" ]
+		find = [ exes["find"] ] + targets + [ "-print0" ]
+		xargs = [ exes["xargs"], "-0", "-P", str(PARALLELISM), "-n", str(BATCH_SIZE), exes["chmod"], "--preserve-root" ]
 		for f in op["flags"]:
 			if not op["flags"][f]:
 				continue
