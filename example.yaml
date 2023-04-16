@@ -7,3 +7,7 @@ jobs:
     permissions: "u=rX,g=rX,o=X"
     flags: [ "verbose", "noforced", "create" ]
     targets: [ "/home/diego/some/dir1", "/home/diego/another/dir1" ]
+  - ownership: "123:456"
+    permissions: "u=rwx,g=rxs,o=rw"
+    flags: [ "quiet", "norecurse",  "noforced", "deref", "create", "traverse" ]
+    targets: [ "/home/user/dir1", "/home/user2" ]

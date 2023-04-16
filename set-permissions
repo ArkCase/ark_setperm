@@ -116,11 +116,11 @@ DEFAULT_FLAGS = { "quiet" : True, "changes" : False, "verbose" : False, "recurse
 # quiet		-> --quiet
 # changes	-> --changes
 # verbose	-> --verbose
-# recurse	-> --recursive
+# recurse	-> (handled specially, by controlling find)
 # noderef	-> --no-dereference (only applies to chown/chgrp)
 # traverse	-> -L (only applies to chown/chgrp)
 
-COMMON_FLAG_PARAMETERS = { "quiet" : "--quiet", "changes" : "--changes", "verbose" : "--verbose", "recurse" : "--recursive" }
+COMMON_FLAG_PARAMETERS = { "quiet" : "--quiet", "changes" : "--changes", "verbose" : "--verbose" }
 OWNERSHIP_FLAG_PARAMETERS = { "noderef" : "--no-dereference", "traverse" : "-L" }
 PERMISSION_FLAG_PARAMETERS = { }
 
@@ -662,6 +662,15 @@ def remove_unnecessary_targets(targets, op):
 			except:
 				pass
 
+def get_recursion_flags(op):
+	try:
+		recurse = (str(op["recurse"]).lower() in TRUE_VALUES)
+	except KeyError:
+		recurse = DEFAULT_FLAGS["recurse"]
+	if recurse:
+		return []
+	return [ "-maxdepth", "0" ]
+
 def process_job(job):
 	op = build_operation(job)
 	allTargets = validate_and_create_targets(job["targets"], op["flags"]["create"])
@@ -672,7 +681,7 @@ def process_job(job):
 	targets = allTargets["ownership"]
 	if ownership and targets:
 		cmd = exes[ownership["command"]]
-		find = [ exes["find"] ] + targets + [ "-print0" ]
+		find = [ exes["find"] ] + targets + get_recursion_flags(op["flags"]) + [ "-print0" ]
 		xargs = [ exes["xargs"], "-0", "-P", str(PARALLELISM), "-n", str(BATCH_SIZE), cmd, "--preserve-root" ]
 		for f in op["flags"]:
 			if not op["flags"][f]:
@@ -704,7 +713,7 @@ def process_job(job):
 	permissions = op["permissions"]
 	targets = allTargets["permissions"]
 	if permissions and targets:
-		find = [ exes["find"] ] + targets + [ "-print0" ]
+		find = [ exes["find"] ] + targets + get_recursion_flags(op["flags"]) + [ "-print0" ]
 		xargs = [ exes["xargs"], "-0", "-P", str(PARALLELISM), "-n", str(BATCH_SIZE), exes["chmod"], "--preserve-root" ]
 		for f in op["flags"]:
 			if not op["flags"][f]:
