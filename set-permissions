@@ -90,7 +90,7 @@ PERMISSIONS_PARSER = re.compile("[ugoa]*([-+=]([rwxXst]*|[ugo]))+|[-+=][0-7]+")
 #
 # For checking if the JOBS variable contains YAML
 #
-JOBS_PARSER = re.compile("^\s*jobs\s*:")
+JOBS_PARSER = re.compile("^\\s*jobs\\s*:")
 
 #
 # Set the parallelism
