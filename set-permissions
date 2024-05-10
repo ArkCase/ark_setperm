@@ -677,11 +677,12 @@ def process_job(job):
 	debug("Targets given: %s", allTargets)
 	allTargets = remove_unnecessary_targets(allTargets, op)
 
+	ignore_broken_symlinks = [ "-not", "-xtype", "l" ]
 	ownership = op["ownership"]
 	targets = allTargets["ownership"]
 	if ownership and targets:
 		cmd = exes[ownership["command"]]
-		find = [ exes["find"] ] + targets + get_recursion_flags(op["flags"]) + [ "-print0" ]
+		find = [ exes["find"] ] + targets + ignore_broken_symlinks + get_recursion_flags(op["flags"]) + [ "-print0" ]
 		xargs = [ exes["xargs"], "-0", "-P", str(PARALLELISM), "-n", str(BATCH_SIZE), cmd, "--preserve-root" ]
 		for f in op["flags"]:
 			if not op["flags"][f]:
@@ -713,7 +714,7 @@ def process_job(job):
 	permissions = op["permissions"]
 	targets = allTargets["permissions"]
 	if permissions and targets:
-		find = [ exes["find"] ] + targets + get_recursion_flags(op["flags"]) + [ "-print0" ]
+		find = [ exes["find"] ] + targets + ignore_broken_symlinks + get_recursion_flags(op["flags"]) + [ "-print0" ]
 		xargs = [ exes["xargs"], "-0", "-P", str(PARALLELISM), "-n", str(BATCH_SIZE), exes["chmod"], "--preserve-root" ]
 		for f in op["flags"]:
 			if not op["flags"][f]:
