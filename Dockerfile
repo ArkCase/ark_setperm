@@ -2,7 +2,7 @@ ARG ARCH="amd64"
 ARG OS="linux"
 ARG VER="1.1.0"
 
-FROM ubuntu:latest
+FROM ubuntu:22.04
 
 #
 # Basic Parameters
