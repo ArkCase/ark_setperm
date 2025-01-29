@@ -1,17 +1,17 @@
 jobs:
   - ownership:
-      #owner: "diego"
-      #group: "998"
+      owner: "diego"
+      group: "995"
       #reference: "/kaka"
     permissions: "u=rwX,g=rX,o="
-    flags: [ "quiet", "recurse",  "noforced", "deref", "create", "traverse" ]
+    flags: [ "quiet", "recurse",  "noforced", "deref", "create", "traverse", "noglob" ]
     targets: 
-      - "/home/diego/some/dir1"
-      - "/home/diego/another/dir1"
+      - "/home/diego/test/some/*"
+      - "/home/diego/test/another/dir1"
   - ownership: "diego:docker"
     permissions: "u=rX,g=rX,o=X"
     flags: [ "verbose", "noforced", "create" ]
-    targets: [ "/home/diego/some/dir1", "/home/diego/another/dir1" ]
+    targets: [ "/home/diego/test/some/dir2", "/home/diego/test/another/dir2" ]
 #  - ownership: "ownership information 3"
 #    permissions: "permissions to set 3"
 #    flags: [ "create", "nocreate", "traverse", "notraverse" ]

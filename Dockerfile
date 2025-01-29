@@ -1,6 +1,6 @@
 ARG ARCH="amd64"
 ARG OS="linux"
-ARG VER="1.1.0"
+ARG VER="1.2.0"
 
 FROM ubuntu:22.04
 

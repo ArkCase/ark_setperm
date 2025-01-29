@@ -11,6 +11,7 @@
 # Import the base libraries
 #
 import datetime
+import glob
 import grp
 import os
 import pwd
@@ -88,6 +89,11 @@ DEFAULT_GROUP_MARKER = "<DEFAULT_GROUP>"
 PERMISSIONS_PARSER = re.compile("[ugoa]*([-+=]([rwxXst]*|[ugo]))+|[-+=][0-7]+")
 
 #
+# For checking if a path is a glob
+#
+GLOB_PARSER = re.compile(".*[*?].*")
+
+#
 # For checking if the JOBS variable contains YAML
 #
 JOBS_PARSER = re.compile("^\\s*jobs\\s*:")
@@ -109,7 +115,7 @@ except ValueError as e:
 	debug("Invalid parallelism value [%s] - will use the default of %d", (p, PARALLELISM))
 
 OUTPUT_FLAGS = { "quiet" : True, "verbose" : True, "changes" : True }
-DEFAULT_FLAGS = { "quiet" : True, "changes" : False, "verbose" : False, "recurse" : True, "forced" : False, "deref" : True, "create" : False, "traverse" : False }
+DEFAULT_FLAGS = { "quiet" : True, "changes" : False, "verbose" : False, "recurse" : True, "forced" : False, "deref" : True, "create" : False, "traverse" : False, "glob" : False }
 
 # The above flags map as follows:
 #
@@ -546,7 +552,7 @@ def build_operation(job):
 
 	return op
 
-def validate_and_create_targets(targets, create=False):
+def validate_and_create_targets(targets, create=False, withGlob=False):
 	# Sanity check: is the list of targets valid?
 	if not targets:
 		raise TargetListEmpty()
@@ -559,6 +565,7 @@ def validate_and_create_targets(targets, create=False):
 	missing = []
 	invalid = []
 	relative = []
+	final_targets = []
 	for tgt in targets:
 		if not isinstance(tgt, TYPE_STRING):
 			invalid.append(tgt)
@@ -567,6 +574,13 @@ def validate_and_create_targets(targets, create=False):
 		if not os.path.isabs(tgt):
 			relative.append(tgt)
 			continue
+
+		if withGlob and GLOB_PARSER.search(tgt):
+			# It's a GLOB! Use it!
+			final_targets += glob.glob(tgt, recursive=True)
+			continue
+
+		final_targets.append(tgt)
 
 		if not os.path.exists(tgt):
 			missing.append(tgt)
@@ -589,7 +603,7 @@ def validate_and_create_targets(targets, create=False):
 		for dir in missing:
 			os.makedirs(dir, 0o750, False)
 
-	return targets
+	return list(set(final_targets))
 
 def remove_unnecessary_targets(targets, op):
 	#
@@ -673,7 +687,7 @@ def get_recursion_flags(op):
 
 def process_job(job):
 	op = build_operation(job)
-	allTargets = validate_and_create_targets(job["targets"], op["flags"]["create"])
+	allTargets = validate_and_create_targets(job["targets"], op["flags"]["create"], op["flags"]["glob"])
 	debug("Targets given: %s", allTargets)
 	allTargets = remove_unnecessary_targets(allTargets, op)
 
