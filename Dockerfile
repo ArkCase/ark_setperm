@@ -1,8 +1,21 @@
-ARG ARCH="amd64"
+#
+# Basic Parameters
+#
+ARG PUBLIC_REGISTRY="public.ecr.aws"
+ARG PRIVATE_REGISTRY
+ARG BASE_VER_PFX=""
+ARG ARCH="x86_64"
 ARG OS="linux"
-ARG VER="1.2.0"
+ARG VER="22.04"
+ARG PKG="setperm"
 
-FROM ubuntu:22.04
+ARG BASE_REGISTRY="${PUBLIC_REGISTRY}"
+ARG BASE_REPO="arkcase/base"
+ARG BASE_VER="${VER}"
+ARG BASE_VER_PFX="${BASE_VER_PFX}"
+ARG BASE_IMG="${BASE_REGISTRY}/${BASE_REPO}:${BASE_VER_PFX}${BASE_VER}"
+
+FROM "${BASE_IMG}"
 
 #
 # Basic Parameters
@@ -31,17 +44,7 @@ ENV NOROOT="False"
 # The jobs to run
 ENV JOBS=""
 
-# Add the common-use functions
-COPY --chown=root:root functions /.functions
-RUN chmod 0444 /.functions
-
-RUN apt-get update && apt-get -y dist-upgrade && apt-get -y install python3-yaml
-COPY --chown=root:root set-permissions /
-RUN /usr/bin/chmod -R 750 /set-permissions
-
-# STIG Remediations
-COPY --chown=root:root stig/ /usr/share/stig/
-RUN cd /usr/share/stig && ./run-all
+COPY --chown=root:root --chmod=0755 set-permissions /
 
 #
 # Final parameters
